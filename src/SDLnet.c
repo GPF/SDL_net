@@ -63,7 +63,7 @@ const SDLNet_version *SDLNet_Linked_Version(void)
 */
 static int SDLNet_started = 0;
 
-#ifndef __USE_W32_SOCKETS
+#if !defined(__USE_W32_SOCKETS) && !defined(__DREAMCAST__)
 #include <signal.h>
 #endif
 
@@ -129,12 +129,18 @@ int  SDLNet_Init(void)
             SDLNet_SetError("Couldn't initialize IBM OS/2 sockets");
             return(-1);
         }
-#else
+#elif !defined(__DREAMCAST__)
         /* SIGPIPE is generated when a remote socket is closed */
         void (*handler)(int);
         handler = signal(SIGPIPE, SIG_IGN);
         if ( handler != SIG_DFL ) {
             signal(SIGPIPE, handler);
+        }
+#else
+        /* KOS networking is initialized by the application with INIT_NET. */
+        if (net_default_dev == NULL) {
+            SDLNet_SetError("KOS networking is not initialized; add KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET) to the application");
+            return(-1);
         }
 #endif
     }
@@ -157,13 +163,15 @@ void SDLNet_Quit(void)
         }
 #elif defined(__OS2__) && !defined(__EMX__)
         /* -- nothing */
-#else
+#elif !defined(__DREAMCAST__)
         /* Restore the SIGPIPE handler */
         void (*handler)(int);
         handler = signal(SIGPIPE, SIG_DFL);
         if ( handler != SIG_IGN ) {
             signal(SIGPIPE, handler);
         }
+#else
+        /* KOS networking is shut down by the application/KOS runtime. */
 #endif
     }
 }
@@ -206,13 +214,17 @@ int SDLNet_ResolveHost(IPaddress *address, const char *host, Uint16 port)
  */
 const char *SDLNet_ResolveIP(const IPaddress *ip)
 {
+#ifndef __DREAMCAST__
     struct hostent *hp;
+#endif
     struct in_addr in;
 
+#ifndef __DREAMCAST__
     hp = gethostbyaddr((const char *)&ip->host, sizeof(ip->host), AF_INET);
     if ( hp != NULL ) {
         return hp->h_name;
     }
+#endif
 
     in.s_addr = ip->host;
     return inet_ntoa(in);
@@ -221,7 +233,15 @@ const char *SDLNet_ResolveIP(const IPaddress *ip)
 int SDLNet_GetLocalAddresses(IPaddress *addresses, int maxcount)
 {
     int count = 0;
-#ifdef SIOCGIFCONF
+#if defined(__DREAMCAST__)
+    if (net_default_dev != NULL) {
+        if (count < maxcount) {
+            SDL_memcpy(&addresses[count].host, net_default_dev->ip_addr, sizeof(addresses[count].host));
+            addresses[count].port = 0;
+        }
+        ++count;
+    }
+#elif defined(SIOCGIFCONF)
 /* Defined on Mac OS X */
 #ifndef _SIZEOF_ADDR_IFREQ
 #define _SIZEOF_ADDR_IFREQ sizeof

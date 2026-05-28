@@ -443,13 +443,22 @@ int SDLNet_UDP_RecvV(UDPsocket sock, UDPpacket **packets)
     struct UDP_channel *binding;
     socklen_t sock_len;
     struct sockaddr_in sock_addr;
+#ifdef __DREAMCAST__
+    const int recv_flags = MSG_DONTWAIT;
+#else
+    const int recv_flags = 0;
+#endif
 
     if ( sock == NULL ) {
         return(0);
     }
 
     numrecv = 0;
-    while ( packets[numrecv] && SocketReady(sock->channel) )
+    while ( packets[numrecv]
+#ifndef __DREAMCAST__
+            && SocketReady(sock->channel)
+#endif
+          )
     {
         UDPpacket *packet;
 
@@ -457,7 +466,7 @@ int SDLNet_UDP_RecvV(UDPsocket sock, UDPpacket **packets)
 
         sock_len = sizeof(sock_addr);
         packet->status = recvfrom(sock->channel,
-                packet->data, packet->maxlen, 0,
+                packet->data, packet->maxlen, recv_flags,
                 (struct sockaddr *)&sock_addr,
                         &sock_len);
         if ( packet->status >= 0 ) {
@@ -486,6 +495,9 @@ foundit:
         else
         {
             packet->len = 0;
+#ifdef __DREAMCAST__
+            break;
+#endif
         }
     }
 

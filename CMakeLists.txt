@@ -52,6 +52,9 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
 option(CMAKE_POSITION_INDEPENDENT_CODE "Build static libraries with -fPIC" ON)
+if(CMAKE_SYSTEM_NAME STREQUAL "dreamcast")
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build the library as a shared library" FORCE)
+endif()
 option(BUILD_SHARED_LIBS "Build the library as a shared library" ON)
 
 cmake_dependent_option(SDL2NET_INSTALL "Enable SDL2_net install target" ${SDL2NET_ROOTPROJECT} ${sdl2net_install_enableable} OFF)
@@ -260,13 +263,18 @@ if(SDL2NET_INSTALL)
     else()
         set(PC_DESTDIR "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
     endif()
+    if(IS_ABSOLUTE "${PC_DESTDIR}")
+        set(PC_INSTALL_DESTDIR "${PC_DESTDIR}")
+    else()
+        set(PC_INSTALL_DESTDIR "\${CMAKE_INSTALL_PREFIX}/${PC_DESTDIR}")
+    endif()
     # Always install SDL2_net.pc: libraries might be different between config modes
     install(CODE "
         # FIXME: use file(COPY_FILE) if minimum CMake version >= 3.21
         execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E copy_if_different
             \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_net-$<CONFIG>.pc\"
             \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_net.pc\")
-        file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${PC_DESTDIR}\"
+        file(INSTALL DESTINATION \"${PC_INSTALL_DESTDIR}\"
             TYPE FILE
             FILES \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_net.pc\")" COMPONENT devel)
 
@@ -279,10 +287,12 @@ if(SDL2NET_INSTALL)
         )
     endif()
 
-    install(FILES "LICENSE.txt"
-        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/${PROJECT_NAME}"
-        COMPONENT library
-    )
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "dreamcast")
+        install(FILES "LICENSE.txt"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/${PROJECT_NAME}"
+            COMPONENT library
+        )
+    endif()
 endif()
 
 if(SDL2NET_SAMPLES)

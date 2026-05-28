@@ -3,9 +3,14 @@
 include(FindPackageHandleStandardArgs)
 include("${CMAKE_CURRENT_LIST_DIR}/CommonFindSDL2.cmake")
 
+set(SDL2_TEST_HINTS ${SDL2_DIR})
+if(CMAKE_SYSTEM_NAME STREQUAL "dreamcast")
+    list(APPEND SDL2_TEST_HINTS "${SDL2_DIR}/../..")
+endif()
+
 find_library(SDL2_TEST_LIBRARY
     NAMES SDL2test SDL2_test
-    HINTS ${SDL2_DIR} ENV SDL2_DIR
+    HINTS ${SDL2_TEST_HINTS} ENV SDL2_DIR
     PATH_SUFFIXES ${_lib_suffixes}
 )
 

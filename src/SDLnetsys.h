@@ -48,7 +48,7 @@
 #ifdef __FreeBSD__
 #include <sys/socket.h>
 #endif
-#ifndef __vita__
+#if !defined(__vita__) && !defined(__DREAMCAST__)
 #include <sys/ioctl.h>
 #endif
 #include <sys/time.h>
@@ -60,8 +60,11 @@
 #endif
 #include <netinet/tcp.h>
 #include <sys/socket.h>
-#if !defined (__PSP__) && !defined (__vita__)
+#if !defined (__PSP__) && !defined (__vita__) && !defined(__DREAMCAST__)
 #include <net/if.h>
+#endif
+#ifdef __DREAMCAST__
+#include <kos/net.h>
 #endif
 #include <netdb.h>
 #endif /* WIN32 */

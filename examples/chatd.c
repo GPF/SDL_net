@@ -32,6 +32,14 @@
 #include "SDL_net.h"
 #include "chat.h"
 
+#ifdef __DREAMCAST__
+#include <kos.h>
+#include <kos/dbgio.h>
+#include <kos/dbglog.h>
+KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET);
+#define DEBUG 1
+#endif
+
 /* This is really easy.  All we do is monitor connections */
 
 static TCPsocket servsock = NULL;
@@ -72,7 +80,11 @@ void HandleServer(void)
                         people[which].sock);
                 SDLNet_TCP_Close(people[which].sock);
 #ifdef DEBUG
+#ifdef __DREAMCAST__
+                dbglog(DBG_INFO, "Killed inactive socket %d\n", which);
+#else
                 SDL_Log("Killed inactive socket %d\n", which);
+#endif
 #endif
                 break;
             }
@@ -84,7 +96,11 @@ void HandleServer(void)
         SDLNet_TCP_Send(newsock, &data, 1);
         SDLNet_TCP_Close(newsock);
 #ifdef DEBUG
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Connection refused -- chat room full\n");
+#else
         SDL_Log("Connection refused -- chat room full\n");
+#endif
 #endif
     } else {
         /* Add socket as an inactive person */
@@ -92,7 +108,11 @@ void HandleServer(void)
         people[which].peer = *SDLNet_TCP_GetPeerAddress(newsock);
         SDLNet_TCP_AddSocket(socketset, people[which].sock);
 #ifdef DEBUG
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "New inactive socket %d\n", which);
+#else
         SDL_Log("New inactive socket %d\n", which);
+#endif
 #endif
     }
 }
@@ -121,8 +141,13 @@ void HandleClient(int which)
     /* Has the connection been closed? */
     if ( SDLNet_TCP_Recv(people[which].sock, data, 512) <= 0 ) {
 #ifdef DEBUG
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Closing socket %d (was%s active)\n",
+                which, people[which].active ? "" : " not");
+#else
         SDL_Log("Closing socket %d (was%s active)\n",
                 which, people[which].active ? "" : " not");
+#endif
 #endif
         /* Notify all active clients */
         if ( people[which].active ) {
@@ -148,8 +173,13 @@ void HandleClient(int which)
                         &data[CHAT_HELLO_NAME], 256);
                 people[which].name[256] = 0;
 #ifdef DEBUG
+#ifdef __DREAMCAST__
+                dbglog(DBG_INFO, "Activating socket %d (%s)\n",
+                        which, people[which].name);
+#else
                 SDL_Log("Activating socket %d (%s)\n",
                         which, people[which].name);
+#endif
 #endif
                 /* Notify all active clients */
                 for ( i=0; i<CHAT_MAXPEOPLE; ++i ) {
@@ -200,17 +230,25 @@ int main(int argc, char *argv[])
 
     /* Initialize SDL */
     if ( SDL_Init(0) < 0 ) {
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Couldn't initialize SDL: %s\n", SDL_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Couldn't initialize SDL: %s\n", 
+                     "Couldn't initialize SDL: %s\n",
                      SDL_GetError());
+#endif
         exit(1);
     }
 
     /* Initialize the network */
     if ( SDLNet_Init() < 0 ) {
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Couldn't initialize net: %s\n", SDLNet_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Couldn't initialize net: %s\n", 
+                     "Couldn't initialize net: %s\n",
                      SDLNet_GetError());
+#endif
         SDL_Quit();
         exit(1);
     }
@@ -224,20 +262,32 @@ int main(int argc, char *argv[])
     /* Allocate the socket set */
     socketset = SDLNet_AllocSocketSet(CHAT_MAXPEOPLE+1);
     if ( socketset == NULL ) {
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Couldn't create socket set: %s\n", SDLNet_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Couldn't create socket set: %s\n",
                      SDLNet_GetError());
+#endif
         cleanup(2);
     }
 
     /* Create the server socket */
     SDLNet_ResolveHost(&serverIP, NULL, CHAT_PORT);
+#ifdef __DREAMCAST__
+    dbglog(DBG_INFO, "Server IP: %x, %d\n", (unsigned int)serverIP.host, serverIP.port);
+#else
     SDL_Log("Server IP: %x, %d\n", serverIP.host, serverIP.port);
+#endif
     servsock = SDLNet_TCP_Open(&serverIP);
     if ( servsock == NULL ) {
+#ifdef __DREAMCAST__
+        dbglog(DBG_INFO, "Couldn't create server socket: %s\n", SDLNet_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Couldn't create server socket: %s\n",
                      SDLNet_GetError());
+#endif
         cleanup(2);
     }
     SDLNet_TCP_AddSocket(socketset, servsock);
@@ -264,4 +314,3 @@ int main(int argc, char *argv[])
     /* Not reached, but fixes compiler warnings */
     return 0;
 }
-

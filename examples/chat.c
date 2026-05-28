@@ -28,9 +28,33 @@
 #include "SDL_test.h"
 #include "chat.h"
 
+#ifdef __DREAMCAST__
+#include <kos.h>
+#include <arch/gdb.h>
+#include <kos/dbgio.h>
+#include <kos/dbglog.h>
+KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET);
+#else
+#define vid_border_color(r, g, b) ((void)0)
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __DREAMCAST__
+#define DEFAULT_CHAT_SERVER "192.168.0.93"
+
+static void DreamcastFatal(const char *context, const char *error)
+{
+    // dbgio_dev_select("fb");
+    // dbgio_enable();
+    printf("SDL_net chat failed\n");
+    printf("%s\n", context);
+    printf("%s\n", error ? error : "Unknown error");
+    thd_sleep(20000);
+}
+#endif
 
 
 /* Global variables */
@@ -59,6 +83,11 @@ typedef struct
 
 static TextWindow *termwin;
 static TextWindow *sendwin;
+
+#ifdef __DREAMCAST__
+static Uint32 last_textinput_tick = 0;
+static char last_textinput_text[8];
+#endif
 
 static TextWindow *TextWindowCreate(int x, int y, int w, int h)
 {
@@ -210,6 +239,16 @@ void SendHello(const char *name)
 void SendBuf(char *buf, int len)
 {
     int i;
+#ifdef __DREAMCAST__
+    int active = 0;
+
+    /* Echo our own message locally. */
+    if (len > 0) {
+        TextWindowAddText(termwin, "[me] ");
+        TextWindowAddTextWithLength(termwin, buf, len);
+        TextWindowAddText(termwin, "\n");
+    }
+#endif
 
     /* Redraw the prompt and add a newline to the buffer */
     TextWindowClear(sendwin);
@@ -224,9 +263,22 @@ void SendBuf(char *buf, int len)
             }
             memcpy(packets[0]->data, buf, len);
             packets[0]->len = len;
+#ifdef __DREAMCAST__
+            ++active;
+            printf("Sending %d bytes to channel %d\n", len, i);
+            if (SDLNet_UDP_Send(udpsock, i, packets[0]) <= 0) {
+                printf("UDP send failed on channel %d: %s\n", i, SDLNet_GetError());
+            }
+#else
             SDLNet_UDP_Send(udpsock, i, packets[0]);
+#endif
         }
     }
+#ifdef __DREAMCAST__
+    if (active == 0) {
+        printf("No active UDP peers to send to\n");
+    }
+#endif
 }
 
 int HandleServerData(Uint8 *data)
@@ -338,10 +390,22 @@ void HandleClient(void)
 
     n = SDLNet_UDP_RecvV(udpsock, packets);
     while ( n-- > 0 ) {
+#ifdef __DREAMCAST__
+        printf("Received %d UDP bytes on channel %d\n", packets[n]->len, packets[n]->channel);
+#endif
         if ( packets[n]->channel >= 0 ) {
             TextWindowAddText(termwin, "[%s] ",
                 people[packets[n]->channel].name);
             TextWindowAddTextWithLength(termwin, (char *)packets[n]->data, packets[n]->len);
+#ifdef __DREAMCAST__
+        } else {
+            printf("Ignoring UDP packet from unbound peer %d.%d.%d.%d:%d\n",
+                (int)((packets[n]->address.host >> 0) & 0xFF),
+                (int)((packets[n]->address.host >> 8) & 0xFF),
+                (int)((packets[n]->address.host >> 16) & 0xFF),
+                (int)((packets[n]->address.host >> 24) & 0xFF),
+                SDLNet_Read16(&packets[n]->address.port));
+#endif
         }
     }
 }
@@ -352,9 +416,13 @@ void HandleNet(void)
     if ( SDLNet_SocketReady(tcpsock) ) {
         HandleServer();
     }
+#ifdef __DREAMCAST__
+    HandleClient();
+#else
     if ( SDLNet_SocketReady(udpsock) ) {
         HandleClient();
     }
+#endif
 }
 
 void InitGUI(int width, int height)
@@ -372,6 +440,9 @@ void InitGUI(int width, int height)
 void DisplayGUI(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+#ifdef __DREAMCAST__
+    vid_border_color(0, 255, 0);
+#endif
     SDL_RenderClear(renderer);
     TextWindowDisplay(termwin, renderer);
     TextWindowDisplay(sendwin, renderer);
@@ -416,25 +487,101 @@ int main(int argc, char *argv[])
     SDL_Window *window;
     SDL_Renderer *renderer;
     int i, done;
+#ifdef __DREAMCAST__
+    const char *server;
+    const char *name = NULL;
+#else
     char *server;
+#endif
     IPaddress serverIP;
     SDL_Event event;
 
+#ifdef __DREAMCAST__
+    // gdb_init();
+    // gdb_breakpoint();
+    // dbgio_dev_select("fb");
+    // dbgio_enable();
+    printf("chat: starting\n");
+    cont_btn_callback(0,
+        CONT_START | CONT_A | CONT_B | CONT_X | CONT_Y,
+        (cont_btn_callback_t)arch_exit);
+
+
+#endif
+
+#ifdef __DREAMCAST__
+    /* Check command line arguments. KOS starts main as main(0, NULL). */
+    if ( argc > 1 && argv != NULL ) {
+        server = argv[1];
+    } else {
+#ifdef DEFAULT_CHAT_SERVER
+        server = DEFAULT_CHAT_SERVER;
+#else
+        SDL_Log("Usage: %s <server>\n", argv ? argv[0] : "chat");
+        exit(1);
+#endif
+    }
+
+    if ( argc > 2 && argv != NULL ) {
+        name = argv[2];
+    }
+#else
     /* Check command line arguments */
     if ( argv[1] == NULL ) {
         SDL_Log("Usage: %s <server>\n", argv[0]);
         exit(1);
     }
+    server = argv[1];
+#endif
 
     /* Initialize SDL */
     if ( SDL_Init(SDL_INIT_VIDEO) < 0 ) {
+#ifdef __DREAMCAST__
+        printf(
+                    "Couldn't initialize SDL: %s\n",
+                    SDL_GetError());
+        DreamcastFatal("Couldn't initialize SDL", SDL_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "Couldn't initialize SDL: %s\n",
                     SDL_GetError());
+#endif
         exit(1);
     }
+#ifdef __DREAMCAST__
+    printf("chat: SDL video initialized\n");
+#endif
 
 
+#ifdef __DREAMCAST__
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+
+    window = SDL_CreateWindow("SDL_net chat",
+                              SDL_WINDOWPOS_UNDEFINED,
+                              SDL_WINDOWPOS_UNDEFINED,
+                              640, 480,
+                              SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
+    if ( window == NULL ) {
+        printf("Couldn't create window: %s\n",
+                     SDL_GetError());
+        DreamcastFatal("Couldn't create window", SDL_GetError());
+        SDL_Quit();
+        exit(1);
+    }
+    printf("chat: window created\n");
+    
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    // SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    if ( renderer == NULL ) {
+        printf("Couldn't create renderer: %s\n",
+                     SDL_GetError());
+        DreamcastFatal("Couldn't create renderer", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        exit(1);
+    }
+    printf("chat: renderer created\n");
+#else
     /* Set a 640x480 video mode */
     if ( SDL_CreateWindowAndRenderer(640, 480, 0, &window, &renderer) < 0 ) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -443,41 +590,83 @@ int main(int argc, char *argv[])
         SDL_Quit();
         exit(1);
     }
+#endif
 
     /* Initialize the network */
     if ( SDLNet_Init() < 0 ) {
+#ifdef __DREAMCAST__
+        printf(
+                     "Couldn't initialize net: %s\n",
+                     SDLNet_GetError());
+        DreamcastFatal("Couldn't initialize net", SDLNet_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Couldn't initialize net: %s\n",
                      SDLNet_GetError());
+#endif
         SDL_Quit();
         exit(1);
     }
+#ifdef __DREAMCAST__
+    printf("chat: SDL_net initialized\n");
+#endif
 
     /* Go! */
     InitGUI(640, 480);
+#ifdef __DREAMCAST__
+    printf("chat: GUI buffers initialized\n");
+#endif
 
     /* Allocate a vector of packets for client messages */
     packets = SDLNet_AllocPacketV(4, CHAT_PACKETSIZE);
     if ( packets == NULL ) {
+#ifdef __DREAMCAST__
+        printf(
+                     "Couldn't allocate packets: Out of memory\n");
+        DreamcastFatal("Couldn't allocate packets", "Out of memory");
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Couldn't allocate packets: Out of memory\n");
+#endif
         cleanup(2);
     }
 
     /* Connect to remote host and create UDP endpoint */
-    server = argv[1];
     TextWindowAddText(termwin, "Connecting to %s ... ", server);
+#ifdef __DREAMCAST__
+    printf(
+                 "Connecting to %s ... ", server);
+#endif
     DisplayGUI(renderer);
+#ifdef __DREAMCAST__
+    printf("chat: first frame displayed\n");
+#endif
     SDLNet_ResolveHost(&serverIP, server, CHAT_PORT);
     if ( serverIP.host == INADDR_NONE ) {
         TextWindowAddText(termwin, "Couldn't resolve hostname\n");
+#ifdef __DREAMCAST__
+        printf(
+                     "Couldn't resolve hostname\n");
+        DisplayGUI(renderer);
+        DreamcastFatal("Couldn't resolve hostname", SDLNet_GetError());
+#endif
     } else {
         /* If we fail, it's okay, the GUI shows the problem */
         tcpsock = SDLNet_TCP_Open(&serverIP);
         if ( tcpsock == NULL ) {
             TextWindowAddText(termwin, "Connect failed\n");
+#ifdef __DREAMCAST__
+            printf(
+                         "Connect failed: %s\n", SDLNet_GetError());
+            DisplayGUI(renderer);
+            DreamcastFatal("Connect failed", SDLNet_GetError());
+#endif
         } else {
             TextWindowAddText(termwin, "Connected\n");
+#ifdef __DREAMCAST__
+            printf(
+                         "Connected\n");
+#endif
         }
     }
     /* Try ports in the range {CHAT_PORT - CHAT_PORT+10} */
@@ -488,21 +677,38 @@ int main(int argc, char *argv[])
         SDLNet_TCP_Close(tcpsock);
         tcpsock = NULL;
         TextWindowAddText(termwin, "Couldn't create UDP endpoint\n");
+#ifdef __DREAMCAST__
+        printf(
+                     "Couldn't create UDP endpoint\n");
+        DisplayGUI(renderer);
+        DreamcastFatal("Couldn't create UDP endpoint", SDLNet_GetError());
+#endif
     }
 
     /* Allocate the socket set for polling the network */
     socketset = SDLNet_AllocSocketSet(2);
     if ( socketset == NULL ) {
+#ifdef __DREAMCAST__
+        printf(
+                     "Couldn't create socket set: %s\n",
+                     SDLNet_GetError());
+        DreamcastFatal("Couldn't create socket set", SDLNet_GetError());
+#else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Couldn't create socket set: %s\n",
                      SDLNet_GetError());
+#endif
         cleanup(2);
     }
     SDLNet_TCP_AddSocket(socketset, tcpsock);
     SDLNet_UDP_AddSocket(socketset, udpsock);
 
     /* Run the GUI, handling network data */
+#ifdef __DREAMCAST__
+    SendHello(name);
+#else
     SendHello(argv[2]);
+#endif
     done = 0;
     while ( !done ) {
         HandleNet();
@@ -518,6 +724,9 @@ int main(int argc, char *argv[])
                     done = 1;
                     break;
                 case SDLK_RETURN:
+#ifdef __DREAMCAST__
+                case SDLK_KP_ENTER:
+#endif
                     /* Send our line of text */
                     SendBuf(keybuf, keypos);
                     keypos = 0;
@@ -536,8 +745,22 @@ int main(int argc, char *argv[])
             case SDL_TEXTINPUT:
                 {
                     size_t textlen = SDL_strlen(event.text.text);
+                    Uint32 now = SDL_GetTicks();
 
                     if ( textlen < sizeof(keybuf) ) {
+#ifdef __DREAMCAST__
+                        if ((SDL_strchr(event.text.text, '\n') != NULL) ||
+                            (SDL_strchr(event.text.text, '\r') != NULL)) {
+                            break;
+                        }
+                        if ((textlen == 1) &&
+                            (event.text.text[0] == last_textinput_text[0]) &&
+                            ((now - last_textinput_tick) < 100)) {
+                            break;
+                        }
+                        last_textinput_tick = now;
+                        SDL_strlcpy(last_textinput_text, event.text.text, sizeof(last_textinput_text));
+#endif
                         /* If the buffer is full, send it */
                         if ( (keypos + textlen) >= sizeof(keybuf) ) {
                             SendBuf(keybuf, keypos);
